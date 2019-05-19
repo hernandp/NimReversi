@@ -1,11 +1,17 @@
 import terminal, random, strscans
 
 type 
-    BoardCell = enum
+    BoardCellContent = enum
         bcWhite = "O", bcBlack = "X", bcEmpty = "."
 
     Player = enum
         plWhite = "White", plBlack = "Black"
+
+    CellCoord = tuple[row: int, col: int]
+
+    BoardCell = object
+        content: BoardCellContent
+        reverseCells: seq[CellCoord]
 
 const
     BOARD_WIDTH = 8
@@ -16,63 +22,100 @@ var
     turn: Player
     board: array[0..(BOARD_WIDTH*BOARD_HEIGHT)-1, BoardCell]
 
-proc setCell(row: int, col: int, what: BoardCell) =
-    board[row * BOARD_WIDTH + col] = what
+proc setCellContent(row: int, col: int, what: BoardCellContent) =
+    board[row * BOARD_WIDTH + col].content = what
+    if what != bcEmpty:
+        board[row * BOARD_WIDTH + col].reverseCells = @[]
 
-proc getCell(row: int, col: int) : BoardCell =
-    return board[row * BOARD_WIDTH + col]
+proc getCellContent(row: int, col: int) : BoardCellContent =
+    return board[row * BOARD_WIDTH + col].content
 
 proc otherPlayer(p: Player) : Player =
     result = if p == plWhite: plBlack else: plWhite
 
 proc isPlayerCell(p: Player, row: int, col: int) : bool =
-    result = ord(getCell(row, col)) == ord(p)
+    result = ord(getCellContent(row, col)) == ord(p)
 
 proc cellInBoard(row: int, col: int) : bool = 
     result = row >= 0 and row < 8 and col >= 0 and col < 8
     
 proc initBoard() =
     for i in 0..board.len-1:
-        board[i] = bcEmpty
+        board[i].content = bcEmpty
     
-    setCell(3, 3, bcWhite)
-    setCell(3, 4, bcBlack)
-    setCell(4, 3, bcBlack)
-    setCell(4, 4, bcWhite)
+    setCellContent(3, 3, bcWhite)
+    setCellContent(3, 4, bcBlack)
+    setCellContent(4, 3, bcBlack)
+    setCellContent(4, 4, bcWhite)
 
 proc printBoard() =
     echo "   0  1  2  3  4  5  6  7"
     for x in 0..BOARD_WIDTH - 1:
         stdout.write ($(x) & "  ")
         for y in 0..BOARD_HEIGHT - 1:
-            stdout.write($(board[x*BOARD_WIDTH + y]) & "  ")
+            let revCells = board[x * BOARD_WIDTH + y].reverseCells
+            if (len(revCells) > 0):
+                stdout.write($(len(revCells)) & "  ")
+            else:
+                stdout.write($(board[x*BOARD_WIDTH + y]).content & "  ")
         stdout.writeLine("")
 
+proc flipCell(row: int, col: int) =
+    setCellContent(row, col, if getCellContent(row,col) == bcWhite: bcBlack else: bcWhite)
 
-# Scan in the eight directions (UL, U, UR, R, DR, D, DL, L) for
-# a line of rival discs bounded by our own that can be reversed. 
-# dx = delta-X to add for next lookup
-# dy = delta-Y to add for next lookup
-proc lookupDiscsToReverse(turn: Player, row: int, col: int, dx: int, dy: int, cellsToReverse: var seq[tuple[row:int, col:int]]) : bool =
-    if getCell(row, col) == bcEmpty or not cellInBoard(row, col):
+proc lookupDiscsToReverse(turn: Player, row: int, col: int, rowStep: int, colStep: int, 
+    cellsToReverse: var seq[CellCoord]) : bool =
+    
+    # Found empty cell or out of board, finish recursion with failed result
+    if not cellInBoard(row, col):
         return false
 
-    if not isPlayerCell(turn, row, col):
-        if lookupDiscsToReverse(turn, row + dy, col + dx, dx, dy, cellsToReverse):
-            cellsToReverse.add((row,col))
+    if getCellContent(row, col) == bcEmpty:
+        return false
 
-    return true
+    # Own disc found, finish recursion with successful result
+    if isPlayerCell(turn, row, col):
+        return true
+
+    # Keep looking in dx/dy vector
+    let r = lookupDiscsToReverse(turn, row + rowStep, col + colStep, rowStep, colStep, cellsToReverse)
+    if r:
+        cellsToReverse.add((row,col))
     
+    return r
 
-proc placeDisc(turn: Player, row: int, col: int) : bool =
-    if getCell(row, col) != bcEmpty:
+proc placeDisc(row: int, col: int) : bool =
+    if getCellContent(row, col) != bcEmpty:
         echo "Cell not empty!"
         return false
+    
+    let cellsToReverse = board[col * BOARD_WIDTH + row].reverseCells  
+    if len(cellsToReverse) > 0:
+        setCellContent(row, col, BoardCellContent(ord(turn)))
+        for cell in cellsToReverse:
+            flipCell(cell.row, cell.col)
+        return true
+    
+    return false
 
-    var cellsToReverse: seq[tuple[row: int, col: int]]
-    let lookupResult = lookupDiscsToReverse(turn, row + 1, col + 1, 1, 1, cellsToReverse)
-    return (lookupResult or (lookupResult and len(cellsToReverse) == 0))
-        
+proc scanDiscsToReverse(row: int, col: int): seq[CellCoord] =
+    var cellsToReverse: seq[CellCoord]
+    for dx in @[0, 1, -1]:
+        for dy in @[0, 1, -1]:
+            if (dx == 0 and dy == 0):
+                continue;
+            discard lookupDiscsToReverse(turn, row + dx, col + dy, dx, dy, cellsToReverse)
+    
+    return cellsToReverse    
+
+proc scanBoard() =
+    var cellsToReverse: seq[CellCoord]
+    for x in 0..BOARD_WIDTH - 1:
+        for y in 0..BOARD_HEIGHT - 1:
+            if board[x * BOARD_WIDTH + y].content == bcEmpty:
+                cellsToReverse = scanDiscsToReverse(x, y)
+                board[x * BOARD_WIDTH + y].reverseCells = cellsToReverse
+
 randomize()
 initBoard()
 
@@ -82,8 +125,10 @@ while running:
     var 
         playerInput: string
         inRow, inCol: int
-
+    
+    scanBoard()
     printBoard()
+
     echo "TURN: ", turn
 
     while true:    
@@ -98,8 +143,12 @@ while running:
                     continue
                 break
         
-    if not placeDisc(turn, inRow, inCol):
-        echo "Invalid move, select another position!"
+    if not placeDisc(inRow, inCol):
+        echo ""
+        echo "** Invalid move, select another position! ** "
+        echo ""
+    else:
+        turn = otherPlayer(turn)
 
 
             
