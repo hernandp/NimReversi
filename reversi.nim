@@ -1,4 +1,4 @@
-import terminal, random, strscans
+import terminal, random, strscans, sequtils
 
 type 
     BoardCellContent = enum
@@ -21,6 +21,7 @@ var
     running: bool
     turn: Player
     board: array[0..(BOARD_WIDTH*BOARD_HEIGHT)-1, BoardCell]
+    vsCpu: bool
 
 proc setCellContent(row: int, col: int, what: BoardCellContent) =
     board[row * BOARD_WIDTH + col].content = what
@@ -89,7 +90,10 @@ proc placeDisc(row: int, col: int) : bool =
         echo "Cell not empty!"
         return false
     
-    let cellsToReverse = board[col * BOARD_WIDTH + row].reverseCells  
+    let cellsToReverse = board[row * BOARD_WIDTH + col].reverseCells  
+    
+    # echo "DEBUG: " & $(cellsToReverse.len()) & " at r=" & $(row) & " c=" & $(col)
+     
     if len(cellsToReverse) > 0:
         setCellContent(row, col, BoardCellContent(ord(turn)))
         for cell in cellsToReverse:
@@ -108,13 +112,79 @@ proc scanDiscsToReverse(row: int, col: int): seq[CellCoord] =
     
     return cellsToReverse    
 
-proc scanBoard() =
-    var cellsToReverse: seq[CellCoord]
+#
+# Scans all board for the number of available overthrows of 
+# opponent pieces for each empty cell.  Returns:
+# A tuple with: 
+# - the the total number of available overthrows in board for 
+#   the current player. If 0 no moves are available.
+# - score (count) of white discs.
+# - score (count) of black discs.
+#
+proc scanBoard() : tuple[ totalMoveCount: int, blackScore: int, whiteScore: int ]=
+    var 
+        cellsToReverse: seq[CellCoord]
+        retval : tuple[ totalMoveCount: int, blackScore: int, whiteScore: int ]
+
+    retval.totalMoveCount = 0
     for x in 0..BOARD_WIDTH - 1:
         for y in 0..BOARD_HEIGHT - 1:
             if board[x * BOARD_WIDTH + y].content == bcEmpty:
                 cellsToReverse = scanDiscsToReverse(x, y)
                 board[x * BOARD_WIDTH + y].reverseCells = cellsToReverse
+                retval.totalMoveCount += len(cellsToReverse)
+            else:
+                if board[x * BOARD_WIDTH + y].content == bcWhite:
+                    retval.whiteScore += 1
+                else:
+                    retval.blackScore += 1
+    return retval
+
+#
+# Evaluate a CPU Turn. 
+# This dumb AI will filter out the cells with better score,
+# and pick one randomly if there are many to choose from.
+#
+proc evaluateCpuTurn() : CellCoord = 
+    var
+        topScore: int
+        cellsToEval: seq[tuple[coord: CellCoord, score: int]]
+
+    topScore = 0;
+    for col in 0..BOARD_WIDTH - 1:
+        for row in 0..BOARD_HEIGHT - 1:
+            let cell = board[row * BOARD_WIDTH + col]
+            let cellScore = len(cell.reverseCells)
+            if cellScore > 0 and cellScore >= topScore:
+                cellsToEval.insert( (coord: (row: row, col: col), score: cellScore), 0)
+                topScore = cellScore
+    
+    echo "found alternatives: "
+    for i in cellsToEval:
+        echo i.coord.col, i.coord.row, i.score
+    
+    # keep only the top scored cells.
+
+    keepIf(cellsToEval, proc (cell: tuple[coord: CellCoord, score: int]): bool = return cell.score == topScore)
+
+    echo "filtered out: "
+    for i in cellsToEval:
+        echo i.coord.col, i.coord.row, i.score
+    
+    # Choose a random one.
+    let randIdx = rand(len(cellsToEval) - 1)
+    return (row: cellsToEval[randIdx].coord.row, col: cellsToEval[randIdx].coord.col)
+
+#
+# End of game routine
+#
+proc endGame(whiteScore: int, blackScore: int) =
+    if whiteScore == blackScore:
+        echo "DRAW"
+    elif whiteScore > blackScore:
+        echo "WHITE WINS"
+    else:
+        echo "BLACK WINS"    
 
 randomize()
 initBoard()
@@ -125,11 +195,30 @@ while running:
     var 
         playerInput: string
         inRow, inCol: int
+        lastPlayerAvailMoves: int
+        thisPlayerAvailMoves: int
+        whiteScore: int
+        blackScore: int
     
-    scanBoard()
+    thisPlayerAvailMoves = scanBoard().totalMoveCount
+    if thisPlayerAvailMoves == 0:
+        if lastPlayerAvailMoves == 0:
+            endGame(whiteScore, blackScore)
+            break
+        else:
+            lastPlayerAvailMoves = thisPlayerAvailMoves
+            echo "** No moves for current turn! **"
+            turn = otherPlayer(turn)
+            continue
+        
     printBoard()
 
     echo "TURN: ", turn
+
+    if turn == plBlack and vsCpu:
+        let cpuCell = evaluateCpuTurn()
+        discard placeDisc(cpuCell.row, cpuCell.col)
+        break
 
     while true:    
         echo "Where to place your disc?  Enter ROW (0-7),COL(0-7): "
