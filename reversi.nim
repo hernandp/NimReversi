@@ -1,6 +1,11 @@
 import terminal, random, strscans, sequtils
+import uichars
+import os
 
 type 
+    GameState = enum
+        gsMainMenu, gsTurn, gsEndGame
+
     BoardCellContent = enum
         bcWhite = "O", bcBlack = "X", bcEmpty = "."
 
@@ -18,6 +23,7 @@ const
     BOARD_HEIGHT = 8
 
 var
+    gameState: GameState
     running: bool
     turn: Player
     board: array[0..(BOARD_WIDTH*BOARD_HEIGHT)-1, BoardCell]
@@ -161,7 +167,7 @@ proc evaluateCpuTurn() : CellCoord =
     
     echo "found alternatives: "
     for i in cellsToEval:
-        echo i.coord.col, i.coord.row, i.score
+        echo "Col= " & $(i.coord.col) & "Row=" & $(i.coord.row) & " Score=" & $(i.score)
     
     # keep only the top scored cells.
 
@@ -173,7 +179,10 @@ proc evaluateCpuTurn() : CellCoord =
     
     # Choose a random one.
     let randIdx = rand(len(cellsToEval) - 1)
-    return (row: cellsToEval[randIdx].coord.row, col: cellsToEval[randIdx].coord.col)
+    let chosenRow = cellsToEval[randIdx].coord.row
+    let chosenCol = cellsToEval[randIdx].coord.col
+    echo "choosen row: " & $(chosenRow) & " col: " & $(chosenCol)
+    return (row: chosenRow, col: chosenCol)
 
 #
 # End of game routine
@@ -186,9 +195,86 @@ proc endGame(whiteScore: int, blackScore: int) =
     else:
         echo "BLACK WINS"    
 
+#
+# Draw the main menu screen
+#
+proc drawMainMenu(menuOpts: seq[string], currentOpt: int) =
+    var colorSet  {.global.} = @[bgBlack, bgRed, bgGreen, bgYellow, bgBlue, bgMagenta, bgCyan]
+    
+    stdout.setCursorPos 0, 0
+    stdout.styledWrite(colorSet[0],  "     ", colorSet[1], "     ", colorSet[2], "     ", colorSet[3], "     ", colorSet[4], "     ",  colorSet[5], "     ", colorSet[6], "     ")
+    stdout.setCursorPos 0, 1
+    stdout.styledWrite(colorSet[0],  "  R  ", colorSet[1], "  E  ", colorSet[2], "  V  ", colorSet[3], "  E  ", colorSet[4], "  R  ",  colorSet[5], "  S  ", colorSet[6], "  I  ")
+    stdout.setCursorPos 0, 2
+    stdout.styledWrite(colorSet[0],  "     ", colorSet[1], "     ", colorSet[2], "     ", colorSet[3], "     ", colorSet[4], "     ",  colorSet[5], "     ", colorSet[6], "     ")
+    let first = colorSet[0]
+    colorSet.delete(0, 0)
+    colorSet.add(first)
+
+    stdout.setCursorPos 0, 4
+    stdout.styledWrite(bgBlue, fgCyan, styleBright, "Written by Hernan Di Pietro") 
+    
+    for i, menuEntry in menuOpts:
+        stdout.setCursorPos 0, 6 + i
+        if i == currentOpt:
+            stdout.styledWrite(bgWhite, fgBlue, menuEntry)
+        else:
+            stdout.styledWrite(bgCyan, fgWhite, menuEntry)
+
+#
+# Main loop
+#
+system.addQuitProc(resetAttributes)
+
+setBackgroundColor(bgBlue)
+eraseScreen
+
+gameState = gsMainMenu
 randomize()
+
+var currentMenuOpt = 0
+
+while true:    
+    case gameState:
+        of gsMainMenu:
+            const menuOpts = @["    One player game    ", "    Two player game    ", "    CPU   vs   CPU     ", "         Exit          "]
+            drawMainMenu(menuOpts, currentMenuOpt)
+
+            while true:
+                let ch = getch()
+                case ch:
+                of 'z','Z':
+                    currentMenuOpt = if currentMenuOpt == len(menuOpts) - 1: 0 else: currentMenuOpt + 1
+                    break
+                of 'a','A':
+                    currentMenuOpt = if currentMenuOpt == 0: len(menuOpts) - 1 else: currentMenuOpt - 1
+                    break
+                of '\13':
+                    case currentMenuOpt:
+                    of 0:
+                        echo "W"
+                    of 1:
+                        echo "X"
+                    of 2:
+                        echo "M"
+                    of 3:
+                        resetAttributes()
+                        eraseScreen()
+                        echo "BYE!"
+                        quit(0)
+                    else:
+                        discard
+                else:
+                    discard
+                    
+        of gsTurn:
+            echo "X"
+        of gsEndGame:
+            echo "Y"
+
 initBoard()
 
+vsCpu = true
 running = true
 turn = Player(rand(1))
 while running:
@@ -210,34 +296,38 @@ while running:
             echo "** No moves for current turn! **"
             turn = otherPlayer(turn)
             continue
+            
         
     printBoard()
+
+    echo "AvailMoveCount: " & $(thisPlayerAvailMoves)
+    echo "BLACK: " & $(blackScore) & "WHITE: " & $(whiteScore)
 
     echo "TURN: ", turn
 
     if turn == plBlack and vsCpu:
         let cpuCell = evaluateCpuTurn()
         discard placeDisc(cpuCell.row, cpuCell.col)
-        break
-
-    while true:    
-        echo "Where to place your disc?  Enter ROW (0-7),COL(0-7): "
-        if stdin.readLine(playerInput):
-            if scanf(playerInput, "$i,$i", inRow, inCol):
-                if inRow < 0 or inRow > 7:
-                    echo "Bad ROW input!"
-                    continue
-                if inCol < 0 or inCol > 7:
-                    echo "Bad COL input!"
-                    continue
-                break
-        
-    if not placeDisc(inRow, inCol):
-        echo ""
-        echo "** Invalid move, select another position! ** "
-        echo ""
-    else:
-        turn = otherPlayer(turn)
+        turn = plWhite
+    else:        
+        while true:    
+            echo "Where to place your disc?  Enter ROW (0-7),COL(0-7): "
+            if stdin.readLine(playerInput):
+                if scanf(playerInput, "$i,$i", inRow, inCol):
+                    if inRow < 0 or inRow > 7:
+                        echo "Bad ROW input!"
+                        continue
+                    if inCol < 0 or inCol > 7:
+                        echo "Bad COL input!"
+                        continue
+                    break
+            
+        if not placeDisc(inRow, inCol):
+            echo ""
+            echo "** Invalid move, select another position! ** "
+            echo ""
+        else:
+            turn = otherPlayer(turn)
 
 
             
