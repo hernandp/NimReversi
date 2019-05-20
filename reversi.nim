@@ -1,6 +1,4 @@
 import terminal, random, strscans, sequtils
-import uichars
-import os
 
 type 
     GameState = enum
@@ -18,16 +16,22 @@ type
         content: BoardCellContent
         reverseCells: seq[CellCoord]
 
+    PlayerKind = enum
+        pkHuman, pkComputer
+
 const
     BOARD_WIDTH = 8
     BOARD_HEIGHT = 8
 
 var
-    gameState: GameState
-    running: bool
-    turn: Player
-    board: array[0..(BOARD_WIDTH*BOARD_HEIGHT)-1, BoardCell]
-    vsCpu: bool
+    gameState:      GameState
+    running:        bool
+    turn:           Player
+    board:          array[0..(BOARD_WIDTH*BOARD_HEIGHT)-1, BoardCell]
+    playerKind:     array[0..1, PlayerKind]
+    scoreBoard:     tuple[black: int, white: int]
+    currentMenuOpt: int = 0
+    currentCursor:  CellCoord
 
 proc setCellContent(row: int, col: int, what: BoardCellContent) =
     board[row * BOARD_WIDTH + col].content = what
@@ -37,6 +41,9 @@ proc setCellContent(row: int, col: int, what: BoardCellContent) =
 proc getCellContent(row: int, col: int) : BoardCellContent =
     return board[row * BOARD_WIDTH + col].content
 
+proc getCell(row:int, col: int) : BoardCell =
+    return board[row * BOARD_WIDTH + col]
+
 proc otherPlayer(p: Player) : Player =
     result = if p == plWhite: plBlack else: plWhite
 
@@ -45,7 +52,13 @@ proc isPlayerCell(p: Player, row: int, col: int) : bool =
 
 proc cellInBoard(row: int, col: int) : bool = 
     result = row >= 0 and row < 8 and col >= 0 and col < 8
+
+proc getIndexFromCoord(row: int, col: int): int =
+    return row * BOARD_WIDTH + col
     
+#
+# Initialize game board and scores
+#
 proc initBoard() =
     for i in 0..board.len-1:
         board[i].content = bcEmpty
@@ -55,21 +68,49 @@ proc initBoard() =
     setCellContent(4, 3, bcBlack)
     setCellContent(4, 4, bcWhite)
 
-proc printBoard() =
-    echo "   0  1  2  3  4  5  6  7"
-    for x in 0..BOARD_WIDTH - 1:
-        stdout.write ($(x) & "  ")
-        for y in 0..BOARD_HEIGHT - 1:
-            let revCells = board[x * BOARD_WIDTH + y].reverseCells
-            if (len(revCells) > 0):
-                stdout.write($(len(revCells)) & "  ")
-            else:
-                stdout.write($(board[x*BOARD_WIDTH + y]).content & "  ")
-        stdout.writeLine("")
+    scoreBoard = (black: 0, white: 0)
 
+#
+# Print the current board, along scores
+#
+proc drawInGameScreen() =
+    
+    stdout.setCursorPos(1,1)
+    stdout.styledWrite(bgGreen, fgBlack,"    A  B  C  D  E  F  G  H ")
+    
+    for thisRow in 0..BOARD_HEIGHT - 1:
+        stdout.setCursorPos(1, thisRow + 2)
+        stdout.styledWrite(bgGreen, fgBlack, " " & $( thisRow + 1 ) & " ")
+        for thisCol in 0..BOARD_WIDTH - 1:
+            let idx = getIndexFromCoord(thisRow, thisCol)
+            # let revCells = board[idx].reverseCells
+            # if (len(revCells) > 0):
+            #     stdout.write($(len(revCells)) & "  ")
+            # else:
+
+            let oddRow = if thisRow mod 2 == 0 : 0 else: 1
+            stdout.setCursorPos(4 + thisCol * 3, thisRow + 2)   
+
+            var backColor : BackgroundColor
+            if currentCursor.row == thisRow and currentCursor.col == thisCol:
+                backColor = bgRed
+            else:
+                backColor = if (idx + oddRow) mod 2 == 0: bgMagenta else: bgCyan
+
+            stdout.styledWrite(backColor, 
+                if getCellContent(thisRow, thisCol) == bcWhite: fgWhite else: fgBlack,
+                if getCellContent(thisRow, thisCol) == bcEmpty: "   " else: " O ")
+
+#
+# Flip (overthrow) a disc in the board
+#
 proc flipCell(row: int, col: int) =
+    assert(getCellContent(row, col) != bcEmpty)
     setCellContent(row, col, if getCellContent(row,col) == bcWhite: bcBlack else: bcWhite)
 
+#
+# Lookup how many discs can be overthrown in a specified direction (rowStep/colStep)
+#
 proc lookupDiscsToReverse(turn: Player, row: int, col: int, rowStep: int, colStep: int, 
     cellsToReverse: var seq[CellCoord]) : bool =
     
@@ -91,12 +132,15 @@ proc lookupDiscsToReverse(turn: Player, row: int, col: int, rowStep: int, colSte
     
     return r
 
+#
+# Place a player disc in the board
+#
 proc placeDisc(row: int, col: int) : bool =
     if getCellContent(row, col) != bcEmpty:
         echo "Cell not empty!"
         return false
     
-    let cellsToReverse = board[row * BOARD_WIDTH + col].reverseCells  
+    let cellsToReverse = getCell(row, col).reverseCells  
     
     # echo "DEBUG: " & $(cellsToReverse.len()) & " at r=" & $(row) & " c=" & $(col)
      
@@ -108,6 +152,11 @@ proc placeDisc(row: int, col: int) : bool =
     
     return false
 
+#
+# Scan for all discs that can be reversed in the
+# eight directions (up, down, left, right, up-down, up-left, down-right, down-left)
+# from a specific board cell
+#
 proc scanDiscsToReverse(row: int, col: int): seq[CellCoord] =
     var cellsToReverse: seq[CellCoord]
     for dx in @[0, 1, -1]:
@@ -133,14 +182,14 @@ proc scanBoard() : tuple[ totalMoveCount: int, blackScore: int, whiteScore: int 
         retval : tuple[ totalMoveCount: int, blackScore: int, whiteScore: int ]
 
     retval.totalMoveCount = 0
-    for x in 0..BOARD_WIDTH - 1:
-        for y in 0..BOARD_HEIGHT - 1:
-            if board[x * BOARD_WIDTH + y].content == bcEmpty:
-                cellsToReverse = scanDiscsToReverse(x, y)
-                board[x * BOARD_WIDTH + y].reverseCells = cellsToReverse
+    for thisCol in 0..BOARD_WIDTH - 1:
+        for thisRow in 0..BOARD_HEIGHT - 1:
+            if getCellContent(thisRow, thisCol) == bcEmpty:
+                cellsToReverse = scanDiscsToReverse(thisRow, thisCol)
+                board[getIndexFromCoord(thisRow, thisCol)].reverseCells = cellsToReverse
                 retval.totalMoveCount += len(cellsToReverse)
             else:
-                if board[x * BOARD_WIDTH + y].content == bcWhite:
+                if getCellContent(thisRow, thisCol) == bcWhite:
                     retval.whiteScore += 1
                 else:
                     retval.blackScore += 1
@@ -157,12 +206,11 @@ proc evaluateCpuTurn() : CellCoord =
         cellsToEval: seq[tuple[coord: CellCoord, score: int]]
 
     topScore = 0;
-    for col in 0..BOARD_WIDTH - 1:
-        for row in 0..BOARD_HEIGHT - 1:
-            let cell = board[row * BOARD_WIDTH + col]
-            let cellScore = len(cell.reverseCells)
+    for thisCol in 0..BOARD_WIDTH - 1:
+        for thisRow in 0..BOARD_HEIGHT - 1:
+            let cellScore = len(getCell(thisRow , thisCol).reverseCells)
             if cellScore > 0 and cellScore >= topScore:
-                cellsToEval.insert( (coord: (row: row, col: col), score: cellScore), 0)
+                cellsToEval.insert( (coord: (row: thisRow, col: thisCol), score: cellScore), 0)
                 topScore = cellScore
     
     echo "found alternatives: "
@@ -173,15 +221,15 @@ proc evaluateCpuTurn() : CellCoord =
 
     keepIf(cellsToEval, proc (cell: tuple[coord: CellCoord, score: int]): bool = return cell.score == topScore)
 
-    echo "filtered out: "
-    for i in cellsToEval:
-        echo i.coord.col, i.coord.row, i.score
+    # echo "filtered out: "
+    # for i in cellsToEval:
+    #     echo i.coord.col, i.coord.row, i.score
     
     # Choose a random one.
     let randIdx = rand(len(cellsToEval) - 1)
     let chosenRow = cellsToEval[randIdx].coord.row
     let chosenCol = cellsToEval[randIdx].coord.col
-    echo "choosen row: " & $(chosenRow) & " col: " & $(chosenCol)
+    # echo "choosen row: " & $(chosenRow) & " col: " & $(chosenCol)
     return (row: chosenRow, col: chosenCol)
 
 #
@@ -232,31 +280,33 @@ eraseScreen
 gameState = gsMainMenu
 randomize()
 
-var currentMenuOpt = 0
-
 while true:    
     case gameState:
         of gsMainMenu:
+            #
+            # In-Game Main Menu State
+            #
+
             const menuOpts = @["    One player game    ", "    Two player game    ", "    CPU   vs   CPU     ", "         Exit          "]
             drawMainMenu(menuOpts, currentMenuOpt)
 
             while true:
                 let ch = getch()
                 case ch:
-                of 'z','Z':
+                of 'S','s':
                     currentMenuOpt = if currentMenuOpt == len(menuOpts) - 1: 0 else: currentMenuOpt + 1
                     break
-                of 'a','A':
+                of 'W','w':
                     currentMenuOpt = if currentMenuOpt == 0: len(menuOpts) - 1 else: currentMenuOpt - 1
                     break
                 of '\13':
                     case currentMenuOpt:
-                    of 0:
-                        echo "W"
-                    of 1:
-                        echo "X"
-                    of 2:
-                        echo "M"
+                    of 0, 1, 2:
+                        setBackgroundColor(bgBlue)
+                        eraseScreen()
+                        initBoard()
+                        playerKind = [if currentMenuOpt == 2: pkComputer else: pkHuman, if currentMenuOpt == 2: pkComputer else: pkHuman]
+                        gameState = gsTurn
                     of 3:
                         resetAttributes()
                         eraseScreen()
@@ -268,14 +318,29 @@ while true:
                     discard
                     
         of gsTurn:
-            echo "X"
+            #
+            # In-game state
+            #
+            drawInGameScreen()
+
+            let ch = getch()
+            case ch:
+                of 'w','W':
+                    currentCursor.row = if currentCursor.row == 0: BOARD_HEIGHT-1 else: currentCursor.row - 1
+                of 's','S':
+                    currentCursor.row = if currentCursor.row == BOARD_HEIGHT-1: 0 else: currentCursor.row + 1
+                of 'a', 'A':
+                    currentCursor.col = if currentCursor.col == 0: BOARD_WIDTH-1 else: currentCursor.col - 1
+                of 'd', 'D':
+                    currentCursor.col = if currentCursor.col == BOARD_WIDTH-1: 0 else: currentCursor.col + 1
+                of '\13':
+                    discard placeDisc(currentCursor.row, currentCursor.col)
+                else:
+                    discard
+
         of gsEndGame:
             echo "Y"
-
-initBoard()
-
-vsCpu = true
-running = true
+#[
 turn = Player(rand(1))
 while running:
     var 
@@ -298,7 +363,7 @@ while running:
             continue
             
         
-    printBoard()
+    drawInGameScreen()
 
     echo "AvailMoveCount: " & $(thisPlayerAvailMoves)
     echo "BLACK: " & $(blackScore) & "WHITE: " & $(whiteScore)
@@ -330,8 +395,5 @@ while running:
             turn = otherPlayer(turn)
 
 
-            
 
-
-
-
+]#
