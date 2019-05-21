@@ -1,4 +1,4 @@
-import terminal, random, strscans, sequtils
+import terminal, random, strscans, sequtils, strformat
 
 type 
     GameState = enum
@@ -30,8 +30,10 @@ var
     board:          array[0..(BOARD_WIDTH*BOARD_HEIGHT)-1, BoardCell]
     playerKind:     array[0..1, PlayerKind]
     scoreBoard:     tuple[black: int, white: int]
-    currentMenuOpt: int = 0
+    currentMenuOpt: range[0..3]
     currentCursor:  CellCoord
+    lastPlayerAvailMoves: int
+    thisPlayerAvailMoves: int
 
 proc setCellContent(row: int, col: int, what: BoardCellContent) =
     board[row * BOARD_WIDTH + col].content = what
@@ -68,7 +70,7 @@ proc initBoard() =
     setCellContent(4, 3, bcBlack)
     setCellContent(4, 4, bcWhite)
 
-    scoreBoard = (black: 0, white: 0)
+    scoreBoard = (black: 2, white: 2)
 
 #
 # Print the current board, along scores
@@ -100,6 +102,31 @@ proc drawInGameScreen() =
             stdout.styledWrite(backColor, 
                 if getCellContent(thisRow, thisCol) == bcWhite: fgWhite else: fgBlack,
                 if getCellContent(thisRow, thisCol) == bcEmpty: "   " else: " O ")
+
+    cursorDown(2)
+    setCursorXPos(1)
+    stdout.styledWrite(bgGreen, fgBlack, "  TURN  ")
+    cursorForward(11)
+    stdout.styledWriteLine(bgGreen, fgBlack, " SCORES ")
+    setCursorXPos(1)
+    if turn == plWhite:
+        stdout.styledWrite(bgWhite, fgBlack, " WHITE  ")
+    else:
+        stdout.styledWrite(bgBlack, fgWhite, " BLACK  ")
+    cursorForward(11)
+    stdout.styledWrite(bgBlack, fgWhite, " " & fmt"{scoreBoard.white:02}" & " ")
+    stdout.styledWriteLine(bgWhite, fgBlack, " " & fmt"{scoreBoard.black:02}" & " ")
+
+    cursorDown(1)
+    setCursorXPos(1)
+    stdout.styledWriteLine(bgCyan, fgWhite, "    Controls   ")
+    setCursorXPos(1)
+    stdout.styledWriteLine(bgCyan, fgWhite, " A W S D ", bgMagenta, " Move Cursor ")
+    setCursorXPos(1)
+    stdout.styledWriteLine(bgCyan, fgWhite, "   ENTER ", bgMagenta, " Place Disc  ")
+    setCursorXPos(1)
+    stdout.styledWriteLine(bgCyan, fgWhite, "     H   ", bgMagenta, " Hint On/Off ")
+
 
 #
 # Flip (overthrow) a disc in the board
@@ -142,7 +169,7 @@ proc placeDisc(row: int, col: int) : bool =
     
     let cellsToReverse = getCell(row, col).reverseCells  
     
-    # echo "DEBUG: " & $(cellsToReverse.len()) & " at r=" & $(row) & " c=" & $(col)
+    echo "DEBUG: " & $(cellsToReverse.len()) & " at r=" & $(row) & " c=" & $(col)
      
     if len(cellsToReverse) > 0:
         setCellContent(row, col, BoardCellContent(ord(turn)))
@@ -176,24 +203,25 @@ proc scanDiscsToReverse(row: int, col: int): seq[CellCoord] =
 # - score (count) of white discs.
 # - score (count) of black discs.
 #
-proc scanBoard() : tuple[ totalMoveCount: int, blackScore: int, whiteScore: int ]=
+proc scanBoard() : int =
     var 
         cellsToReverse: seq[CellCoord]
-        retval : tuple[ totalMoveCount: int, blackScore: int, whiteScore: int ]
+        totalMoveCount : int
 
-    retval.totalMoveCount = 0
+    totalMoveCount = 0
+    scoreBoard = (0,0)
     for thisCol in 0..BOARD_WIDTH - 1:
         for thisRow in 0..BOARD_HEIGHT - 1:
             if getCellContent(thisRow, thisCol) == bcEmpty:
                 cellsToReverse = scanDiscsToReverse(thisRow, thisCol)
                 board[getIndexFromCoord(thisRow, thisCol)].reverseCells = cellsToReverse
-                retval.totalMoveCount += len(cellsToReverse)
+                totalMoveCount += len(cellsToReverse)
             else:
                 if getCellContent(thisRow, thisCol) == bcWhite:
-                    retval.whiteScore += 1
+                    scoreBoard.white += 1
                 else:
-                    retval.blackScore += 1
-    return retval
+                    scoreBoard.black += 1
+    return totalMoveCount
 
 #
 # Evaluate a CPU Turn. 
@@ -307,13 +335,12 @@ while true:
                         initBoard()
                         playerKind = [if currentMenuOpt == 2: pkComputer else: pkHuman, if currentMenuOpt == 2: pkComputer else: pkHuman]
                         gameState = gsTurn
+                        break
                     of 3:
                         resetAttributes()
                         eraseScreen()
                         echo "BYE!"
-                        quit(0)
-                    else:
-                        discard
+                        quit(0)                   
                 else:
                     discard
                     
@@ -321,6 +348,18 @@ while true:
             #
             # In-game state
             #
+           
+            thisPlayerAvailMoves = scanBoard()
+            if thisPlayerAvailMoves == 0:
+                if lastPlayerAvailMoves == 0:
+                    gameState = gsEndGame
+                    break
+                else:
+                    lastPlayerAvailMoves = thisPlayerAvailMoves
+                    echo "** No moves for current turn! **"
+                    turn = otherPlayer(turn)
+
+            
             drawInGameScreen()
 
             let ch = getch()
@@ -334,7 +373,8 @@ while true:
                 of 'd', 'D':
                     currentCursor.col = if currentCursor.col == BOARD_WIDTH-1: 0 else: currentCursor.col + 1
                 of '\13':
-                    discard placeDisc(currentCursor.row, currentCursor.col)
+                    if placeDisc(currentCursor.row, currentCursor.col):
+                        turn = otherPlayer(turn)
                 else:
                     discard
 
