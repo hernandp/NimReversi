@@ -1,8 +1,8 @@
-import terminal, random, strscans, sequtils, strformat
+import terminal, random, strscans, sequtils, strformat, os, times
 
 type 
     GameState = enum
-        gsMainMenu, gsTurn, gsEndGame
+        gsMainMenu, gsTurn, gsThinking, gsEndGame
 
     BoardCellContent = enum
         bcWhite = "O", bcBlack = "X", bcEmpty = "."
@@ -22,6 +22,7 @@ type
 const
     BOARD_WIDTH = 8
     BOARD_HEIGHT = 8
+    CPU_THINKING_TIME_RANGE_MS = (min: 400, max: 4000)
 
 var
     gameState:      GameState
@@ -76,6 +77,9 @@ proc initBoard() =
 # Print the current board, along scores
 #
 proc drawInGameScreen() =
+
+    const thinkingChars = @[ '/', '-', '\\', '|' ]
+    var currentThinkingChar {.global.} : range[0..len(thinkingChars)] = 0
     
     stdout.setCursorPos(1,1)
     stdout.styledWrite(bgGreen, fgBlack,"    A  B  C  D  E  F  G  H ")
@@ -106,20 +110,32 @@ proc drawInGameScreen() =
     cursorDown(2)
     setCursorXPos(1)
     stdout.styledWrite(bgGreen, fgBlack, "  TURN  ")
-    cursorForward(11)
+    
+    if gameState == gsThinking:
+        stdout.styledWrite(bgRed, fgWhite, "  THINKING " )
+    else:
+        stdout.styledWrite(bgBlue, fgWhite,"           " )
+    
     stdout.styledWriteLine(bgGreen, fgBlack, " SCORES ")
+
     setCursorXPos(1)
     if turn == plWhite:
         stdout.styledWrite(bgWhite, fgBlack, " WHITE  ")
     else:
         stdout.styledWrite(bgBlack, fgWhite, " BLACK  ")
-    cursorForward(11)
-    stdout.styledWrite(bgBlack, fgWhite, " " & fmt"{scoreBoard.white:02}" & " ")
-    stdout.styledWriteLine(bgWhite, fgBlack, " " & fmt"{scoreBoard.black:02}" & " ")
+    
+    if gameState == gsThinking:
+        stdout.styledWrite(bgRed, fgWhite, "      " & thinkingChars[currentThinkingChar] & "    "  )
+        currentThinkingChar = (currentThinkingChar + 1) mod len(thinkingChars)
+    else:
+        stdout.styledWrite(bgBlue, fgWhite, "           " )
+
+    stdout.styledWrite(bgBlack, fgWhite, " " & fmt"{scoreBoard.black:02}" & " ")
+    stdout.styledWriteLine(bgWhite, fgBlack, " " & fmt"{scoreBoard.white:02}" & " ")
 
     cursorDown(1)
     setCursorXPos(1)
-    stdout.styledWriteLine(bgCyan, fgWhite, "    Controls   ")
+    stdout.styledWriteLine(bgGreen, fgBlack, "       Controls       ")
     setCursorXPos(1)
     stdout.styledWriteLine(bgCyan, fgWhite, " A W S D ", bgMagenta, " Move Cursor ")
     setCursorXPos(1)
@@ -169,7 +185,7 @@ proc placeDisc(row: int, col: int) : bool =
     
     let cellsToReverse = getCell(row, col).reverseCells  
     
-    echo "DEBUG: " & $(cellsToReverse.len()) & " at r=" & $(row) & " c=" & $(col)
+    # echo "DEBUG: " & $(cellsToReverse.len()) & " at r=" & $(row) & " c=" & $(col)
      
     if len(cellsToReverse) > 0:
         setCellContent(row, col, BoardCellContent(ord(turn)))
@@ -241,9 +257,9 @@ proc evaluateCpuTurn() : CellCoord =
                 cellsToEval.insert( (coord: (row: thisRow, col: thisCol), score: cellScore), 0)
                 topScore = cellScore
     
-    echo "found alternatives: "
-    for i in cellsToEval:
-        echo "Col= " & $(i.coord.col) & "Row=" & $(i.coord.row) & " Score=" & $(i.score)
+    # echo "found alternatives: "
+    # for i in cellsToEval:
+    #     echo "Col= " & $(i.coord.col) & "Row=" & $(i.coord.row) & " Score=" & $(i.score)
     
     # keep only the top scored cells.
 
@@ -308,6 +324,10 @@ eraseScreen
 gameState = gsMainMenu
 randomize()
 
+var 
+    thisThinkingTimeStart: float = 0.0
+    turnThinkingTime: float = 0.0
+
 while true:    
     case gameState:
         of gsMainMenu:
@@ -333,7 +353,7 @@ while true:
                         setBackgroundColor(bgBlue)
                         eraseScreen()
                         initBoard()
-                        playerKind = [if currentMenuOpt == 2: pkComputer else: pkHuman, if currentMenuOpt == 2: pkComputer else: pkHuman]
+                        playerKind = [if currentMenuOpt == 2: pkComputer else: pkHuman, if currentMenuOpt == 2 or currentMenuOpt == 0: pkComputer else: pkHuman]
                         gameState = gsTurn
                         break
                     of 3:
@@ -359,81 +379,38 @@ while true:
                     echo "** No moves for current turn! **"
                     turn = otherPlayer(turn)
 
-            
             drawInGameScreen()
 
-            let ch = getch()
-            case ch:
-                of 'w','W':
-                    currentCursor.row = if currentCursor.row == 0: BOARD_HEIGHT-1 else: currentCursor.row - 1
-                of 's','S':
-                    currentCursor.row = if currentCursor.row == BOARD_HEIGHT-1: 0 else: currentCursor.row + 1
-                of 'a', 'A':
-                    currentCursor.col = if currentCursor.col == 0: BOARD_WIDTH-1 else: currentCursor.col - 1
-                of 'd', 'D':
-                    currentCursor.col = if currentCursor.col == BOARD_WIDTH-1: 0 else: currentCursor.col + 1
-                of '\13':
-                    if placeDisc(currentCursor.row, currentCursor.col):
-                        turn = otherPlayer(turn)
-                else:
-                    discard
+            if playerKind[ord(turn)] == pkComputer:
+                gameState = gsThinking
+                turnThinkingTime = float(rand(CPU_THINKING_TIME_RANGE_MS.min .. CPU_THINKING_TIME_RANGE_MS.max))
+                thisThinkingTimeStart = cpuTime() * 1000
+            else:
+                let ch = getch()
+                case ch:
+                    of 'w','W':
+                        currentCursor.row = if currentCursor.row == 0: BOARD_HEIGHT-1 else: currentCursor.row - 1
+                    of 's','S':
+                        currentCursor.row = if currentCursor.row == BOARD_HEIGHT-1: 0 else: currentCursor.row + 1
+                    of 'a', 'A':
+                        currentCursor.col = if currentCursor.col == 0: BOARD_WIDTH-1 else: currentCursor.col - 1
+                    of 'd', 'D':
+                        currentCursor.col = if currentCursor.col == BOARD_WIDTH-1: 0 else: currentCursor.col + 1
+                    of '\13':
+                        if placeDisc(currentCursor.row, currentCursor.col):
+                            turn = otherPlayer(turn)
+                    else:
+                        discard
+
+        of gsThinking:
+
+            if ( (cpuTime() * 1000) - thisThinkingTimeStart) > turnThinkingTime:
+                let cpuTurn = evaluateCpuTurn()
+                discard placeDisc(cpuTurn.row, cpuTurn.col)
+                turn = otherPlayer(turn)
+                gameState = gsTurn 
+
+            drawInGameScreen()
 
         of gsEndGame:
             echo "Y"
-#[
-turn = Player(rand(1))
-while running:
-    var 
-        playerInput: string
-        inRow, inCol: int
-        lastPlayerAvailMoves: int
-        thisPlayerAvailMoves: int
-        whiteScore: int
-        blackScore: int
-    
-    thisPlayerAvailMoves = scanBoard().totalMoveCount
-    if thisPlayerAvailMoves == 0:
-        if lastPlayerAvailMoves == 0:
-            endGame(whiteScore, blackScore)
-            break
-        else:
-            lastPlayerAvailMoves = thisPlayerAvailMoves
-            echo "** No moves for current turn! **"
-            turn = otherPlayer(turn)
-            continue
-            
-        
-    drawInGameScreen()
-
-    echo "AvailMoveCount: " & $(thisPlayerAvailMoves)
-    echo "BLACK: " & $(blackScore) & "WHITE: " & $(whiteScore)
-
-    echo "TURN: ", turn
-
-    if turn == plBlack and vsCpu:
-        let cpuCell = evaluateCpuTurn()
-        discard placeDisc(cpuCell.row, cpuCell.col)
-        turn = plWhite
-    else:        
-        while true:    
-            echo "Where to place your disc?  Enter ROW (0-7),COL(0-7): "
-            if stdin.readLine(playerInput):
-                if scanf(playerInput, "$i,$i", inRow, inCol):
-                    if inRow < 0 or inRow > 7:
-                        echo "Bad ROW input!"
-                        continue
-                    if inCol < 0 or inCol > 7:
-                        echo "Bad COL input!"
-                        continue
-                    break
-            
-        if not placeDisc(inRow, inCol):
-            echo ""
-            echo "** Invalid move, select another position! ** "
-            echo ""
-        else:
-            turn = otherPlayer(turn)
-
-
-
-]#
