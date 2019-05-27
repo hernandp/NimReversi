@@ -22,7 +22,7 @@ type
 const
     BOARD_WIDTH = 8
     BOARD_HEIGHT = 8
-    CPU_THINKING_TIME_RANGE_MS = (min: 400, max: 4000)
+    CPU_THINKING_TIME_RANGE_MS = (min: 100, max: 1000)
 
 var
     gameState:      GameState
@@ -98,7 +98,7 @@ proc drawInGameScreen() =
             stdout.setCursorPos(4 + thisCol * 3, thisRow + 2)   
 
             var backColor : BackgroundColor
-            if currentCursor.row == thisRow and currentCursor.col == thisCol:
+            if playerKind[ord(turn)] == pkHuman and currentCursor.row == thisRow and currentCursor.col == thisCol:
                 backColor = bgRed
             else:
                 backColor = if (idx + oddRow) mod 2 == 0: bgMagenta else: bgCyan
@@ -109,7 +109,10 @@ proc drawInGameScreen() =
 
     cursorDown(2)
     setCursorXPos(1)
-    stdout.styledWrite(bgGreen, fgBlack, "  TURN  ")
+    if gameState == gsEndGame:
+        stdout.styledWrite(bgWhite, fgBlack, " WINNER ")
+    else:
+        stdout.styledWrite(bgGreen, fgBlack, "  TURN  ")
     
     if gameState == gsThinking:
         stdout.styledWrite(bgRed, fgWhite, "  THINKING " )
@@ -119,11 +122,20 @@ proc drawInGameScreen() =
     stdout.styledWriteLine(bgGreen, fgBlack, " SCORES ")
 
     setCursorXPos(1)
-    if turn == plWhite:
-        stdout.styledWrite(bgWhite, fgBlack, " WHITE  ")
+    if gameState == gsEndGame:
+        if scoreBoard.white > scoreBoard.black:
+            stdout.styledWrite(bgWhite, fgBlack, " WHITE  ")
+        elif scoreBoard.black > scoreBoard.white:
+            stdout.styledWrite(bgBlack, fgWhite, " BLACK  ")
+        else:
+            stdout.styledWrite(bgMagenta, fgWhite, "  DRAW  ")
+
     else:
-        stdout.styledWrite(bgBlack, fgWhite, " BLACK  ")
-    
+        if turn == plWhite:
+            stdout.styledWrite(bgWhite, fgBlack, " WHITE  ")
+        else:
+            stdout.styledWrite(bgBlack, fgWhite, " BLACK  ")
+        
     if gameState == gsThinking:
         stdout.styledWrite(bgRed, fgWhite, "      " & thinkingChars[currentThinkingChar] & "    "  )
         currentThinkingChar = (currentThinkingChar + 1) mod len(thinkingChars)
@@ -135,14 +147,22 @@ proc drawInGameScreen() =
 
     cursorDown(1)
     setCursorXPos(1)
-    stdout.styledWriteLine(bgGreen, fgBlack, "       Controls       ")
-    setCursorXPos(1)
-    stdout.styledWriteLine(bgCyan, fgWhite, " A W S D ", bgMagenta, " Move Cursor ")
-    setCursorXPos(1)
-    stdout.styledWriteLine(bgCyan, fgWhite, "   ENTER ", bgMagenta, " Place Disc  ")
-    setCursorXPos(1)
-    stdout.styledWriteLine(bgCyan, fgWhite, "     H   ", bgMagenta, " Hint On/Off ")
 
+    if gameState == gsEndGame:
+        stdout.styledWriteLine(bgGreen, fgWhite, "       Game Finished       ")
+        setCursorXPos(1)
+        stdout.styledWriteLine(bgGreen, fgBlack, "   Press any key to exit   ")
+        stdout.styledWriteLine(bgBlue, fgBlack,  "                            ")
+        stdout.styledWriteLine(bgBlue, fgBlack,  "                            ")
+        stdout.styledWriteLine(bgBlue, fgBlack,  "                            ")
+    else:    
+        stdout.styledWriteLine(bgGreen, fgBlack, "          Controls         ")
+        setCursorXPos(1)
+        stdout.styledWriteLine(bgCyan, fgWhite, "   A W S D   ", bgMagenta, " Move Cursor  ")
+        setCursorXPos(1)
+        stdout.styledWriteLine(bgCyan, fgWhite, "    ENTER    ", bgMagenta, " Place Disc   ")
+        setCursorXPos(1)
+        stdout.styledWriteLine(bgCyan, fgWhite, "     ESC     ", bgMagenta,"     Exit     ")
 
 #
 # Flip (overthrow) a disc in the board
@@ -277,17 +297,6 @@ proc evaluateCpuTurn() : CellCoord =
     return (row: chosenRow, col: chosenCol)
 
 #
-# End of game routine
-#
-proc endGame(whiteScore: int, blackScore: int) =
-    if whiteScore == blackScore:
-        echo "DRAW"
-    elif whiteScore > blackScore:
-        echo "WHITE WINS"
-    else:
-        echo "BLACK WINS"    
-
-#
 # Draw the main menu screen
 #
 proc drawMainMenu(menuOpts: seq[string], currentOpt: int) =
@@ -313,10 +322,18 @@ proc drawMainMenu(menuOpts: seq[string], currentOpt: int) =
         else:
             stdout.styledWrite(bgCyan, fgWhite, menuEntry)
 
+proc onQuit() {.noconv.}=
+    resetAttributes()
+    showCursor()
+
+#############################################################################
 #
 # Main loop
 #
-system.addQuitProc(resetAttributes)
+#############################################################################
+
+hideCursor()
+system.addQuitProc(onQuit)
 
 setBackgroundColor(bgBlue)
 eraseScreen
@@ -373,10 +390,9 @@ while true:
             if thisPlayerAvailMoves == 0:
                 if lastPlayerAvailMoves == 0:
                     gameState = gsEndGame
-                    break
+                    continue
                 else:
                     lastPlayerAvailMoves = thisPlayerAvailMoves
-                    echo "** No moves for current turn! **"
                     turn = otherPlayer(turn)
 
             drawInGameScreen()
@@ -399,6 +415,10 @@ while true:
                     of '\13':
                         if placeDisc(currentCursor.row, currentCursor.col):
                             turn = otherPlayer(turn)
+                    of '\27':
+                        setBackgroundColor(bgBlue)
+                        eraseScreen()
+                        gameState = gsMainMenu
                     else:
                         discard
 
@@ -413,4 +433,12 @@ while true:
             drawInGameScreen()
 
         of gsEndGame:
-            echo "Y"
+            
+            drawInGameScreen()
+
+            let ch = getch()
+
+            setBackgroundColor(bgBlue)
+            eraseScreen()
+            gameState = gsMainMenu
+
