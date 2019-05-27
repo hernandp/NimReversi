@@ -232,12 +232,9 @@ proc scanDiscsToReverse(row: int, col: int): seq[CellCoord] =
 
 #
 # Scans all board for the number of available overthrows of 
-# opponent pieces for each empty cell.  Returns:
-# A tuple with: 
-# - the the total number of available overthrows in board for 
-#   the current player. If 0 no moves are available.
-# - score (count) of white discs.
-# - score (count) of black discs.
+# opponent pieces for each empty cell.  
+#
+# Returns total move count in board.
 #
 proc scanBoard() : int =
     var 
