@@ -319,25 +319,30 @@ proc evaluateCpuTurn() : CellCoord =
 proc drawMainMenu(menuOpts: seq[string], currentOpt: int) =
     var colorSet  {.global.} = @[bgBlack, bgRed, bgGreen, bgYellow, bgBlue, bgMagenta, bgCyan]
     
-    stdout.setCursorPos 0, 0
+    stdout.setCursorPos 1, 2
     stdout.styledWrite(colorSet[0],  "     ", colorSet[1], "     ", colorSet[2], "     ", colorSet[3], "     ", colorSet[4], "     ",  colorSet[5], "     ", colorSet[6], "     ")
-    stdout.setCursorPos 0, 1
+    stdout.setCursorPos 1, 3
     stdout.styledWrite(colorSet[0],  "  R  ", colorSet[1], "  E  ", colorSet[2], "  V  ", colorSet[3], "  E  ", colorSet[4], "  R  ",  colorSet[5], "  S  ", colorSet[6], "  I  ")
-    stdout.setCursorPos 0, 2
+    stdout.setCursorPos 1, 4
     stdout.styledWrite(colorSet[0],  "     ", colorSet[1], "     ", colorSet[2], "     ", colorSet[3], "     ", colorSet[4], "     ",  colorSet[5], "     ", colorSet[6], "     ")
     let first = colorSet[0]
     colorSet.delete(0, 0)
     colorSet.add(first)
 
-    stdout.setCursorPos 0, 4
-    stdout.styledWrite(bgBlue, fgCyan, styleBright, "Written by Hernan Di Pietro") 
+    stdout.setCursorPos 1, 6
+    stdout.styledWrite(bgBlue, fgCyan, styleBright, "    Written by Hernan Di Pietro" ) 
+    stdout.setCursorPos 1, 7
+    stdout.styledWrite(bgBlue, fgCyan, styleDim, "           MIT Licensed") 
     
     for i, menuEntry in menuOpts:
-        stdout.setCursorPos 0, 6 + i
+        stdout.setCursorPos 7, 9 + i
         if i == currentOpt:
             stdout.styledWrite(bgWhite, fgBlue, menuEntry)
         else:
             stdout.styledWrite(bgCyan, fgWhite, menuEntry)
+
+    stdout.setCursorPos 0, 15
+    stdout.styledWrite(bgBlue, fgWhite, styleDim, "    Use W, S and ENTER to select")
 
 proc onQuit() {.noconv.}=
     resetAttributes()
