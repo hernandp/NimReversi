@@ -23,7 +23,7 @@ Control cursor with A W S D keys, and press ENTER to place discs.
 
 ## Details
 
-The computer AI will filter all but the best positions, that is, where the maximum number of rival discs can be overthrown/reversed. Subsequently, it will randomly select one of the filtered cells. The "THINKING" animated label just simulates a deep AI.  Actually, it's completely dumb. But Reversi is known for being a hard game in terms of planning , even this dumb AI can be challenging.  According to Wikipedia, 
+The computer AI will filter all but the best positions, that is, where the maximum number of rival discs can be overthrown/reversed. Subsequently, it will randomly select one of the top-scored cells. The "THINKING" animated label just simulates a deep AI.  Actually, it's completely dumb. But Reversi is known for being a hard game in terms of planning , even this dumb AI can be challenging.  According to Wikipedia, 
 
 >> This is mostly due to difficulties in human look-ahead peculiar to Othello: The interchangeability of the disks and therefore apparent strategic meaninglessness (as opposed to chess pieces for example) makes an evaluation of different moves much harder.
 
