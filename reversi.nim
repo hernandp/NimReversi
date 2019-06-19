@@ -358,7 +358,7 @@ hideCursor()
 system.addQuitProc(onQuit)
 
 setBackgroundColor(bgBlue)
-eraseScreen
+eraseScreen()
 
 gameState = gsMainMenu
 randomize()
